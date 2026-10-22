@@ -508,7 +508,7 @@ function loadImage(id,thumb=false){
   if(cache.has(id))return Promise.resolve(cache.get(id));
   if(pending.has(key))return pending.get(key);
   const a=assets.get(id);if(!a)return Promise.reject(Error("Missing artwork "+id));
-  const promise=new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>{cache.set(id,im);if(thumb)thumbAssets.set(id,{...a,box:[0,0,im.naturalWidth,im.naturalHeight]});resolve(im);};im.onerror=()=>reject(Error("Artwork unavailable"));im.src=thumb?a.thumb:a.src;}).finally(()=>pending.delete(key));
+  const promise=new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>{cache.set(id,im);if(thumb){thumbAssets.set(id,{...a,box:[0,0,im.naturalWidth,im.naturalHeight]});}else if(a.category==="stickers"){a.box=[0,0,im.naturalWidth,im.naturalHeight];}resolve(im);};im.onerror=()=>reject(Error("Artwork unavailable"));im.src=thumb?a.thumb:a.src;}).finally(()=>pending.delete(key));
   pending.set(key,promise);return promise;
 }
 function usedAssets(s){return [...new Set([...s.objects.filter(o=>o.type==="image").map(o=>o.asset),...(assets.has(s.background)&&!s.transparent?[s.background]:[])])];}
