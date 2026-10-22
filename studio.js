@@ -185,7 +185,7 @@ function render(canvas,state,{assets,images,selected=null,scale=1,selection=true
     const b=geometry(ctx,obj,W,H,assets);ctx.save();ctx.translate(b.x,b.y);ctx.rotate(b.angle);
     if(obj.type==="image"){
       const a=assets.get(obj.asset),im=images.get(obj.asset);
-      if(a&&im){const [x,y,r,bt]=a.box;ctx.drawImage(im,x,y,r-x,bt-y,-b.w/2,-b.h/2,b.w,b.h);}
+      if(a&&im){const [x,y,r,bt]=a.category==="stickers"?[0,0,im.naturalWidth,im.naturalHeight]:a.box;ctx.drawImage(im,x,y,r-x,bt-y,-b.w/2,-b.h/2,b.w,b.h);}
     }else{
       ctx.font=(obj.size*W)+"px "+(obj.font==="sans"?FONT_SANS:FONT_SERIF);ctx.fillStyle=obj.color;ctx.textAlign=obj.align;ctx.textBaseline="middle";
       const lines=wrapText(ctx,obj.text,b.w),lineHeight=obj.size*W*(obj.font==="sans"?1.25:1.07);const x=obj.align==="left"?-b.w/2:obj.align==="right"?b.w/2:0;
