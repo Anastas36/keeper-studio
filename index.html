@@ -60,8 +60,27 @@ dialog{border:1px solid #7d5a553f;background:radial-gradient(ellipse at top righ
 #animation-clear{flex:0 0 auto;margin-top:9px}
 @media(min-width:901px) and (max-width:1150px){.animation-menu{left:-218px;width:206px}.animation-group-items{gap:5px}.animation-effect{font-size:9px}}
 @media(max-width:900px){.animation-menu{left:0;top:49px;width:min(340px,calc(100vw - 32px))}}
+
+/* Move only the existing transparency switch into the unused toolbar space.
+   Keep format picker at the far right with unchanged dimensions and behavior. */
+.toolbar-right{display:flex;align-items:center;gap:12px;margin-left:auto;flex-shrink:0}
+.toolbar-transparent{display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:10px;color:var(--muted);margin:0;cursor:pointer}
+.toolbar-transparent .switch{flex-shrink:0}
+@media(max-width:1350px){.toolbar-right{gap:7px}.toolbar-transparent{gap:5px;font-size:9px}}
+@media(max-width:950px){.canvas-toolbar{flex-wrap:wrap}.toolbar-right{margin-left:auto}.create-story-button{position:relative;left:auto;top:auto;transform:none;order:3;margin:5px auto 0}.create-story-button:hover{transform:none}}
+@media(max-width:620px){.toolbar-right{gap:7px}.toolbar-transparent{font-size:9px}.canvas-toolbar .create-story-button{order:3}}
 </style>
-  <script defer src="studio.js?v=live-preview-test"></script>
+  <script defer src="gif-full-1.js"></script>
+  <script defer src="gif-full-2.js"></script>
+  <script defer src="gif-full-3.js"></script>
+  <script defer src="studio.js?v=download-menu-v1"></script>
+<style>
+.download-wrap{position:relative;flex-shrink:0}.download-wrap>#download-menu-toggle{display:inline-flex;align-items:center;gap:9px;white-space:nowrap}
+.download-menu{position:absolute;right:0;top:calc(100% + 9px);width:244px;padding:7px;background:#302633;border:1px solid #c49b6b77;border-radius:12px;box-shadow:0 16px 44px #0009;z-index:80}
+.download-menu[hidden]{display:none!important}.download-menu button{display:flex;flex-direction:column;align-items:flex-start;gap:5px;width:100%;padding:12px;border-radius:8px;text-align:left;color:#f2d8bb;background:transparent}
+.download-menu button:hover,.download-menu button:focus-visible{background:#e9bc8c22}.download-menu strong{font-size:12px;font-weight:600}.download-menu small{font-size:10px;color:#bba7b6}
+@media(max-width:620px){.download-menu{right:0;width:min(244px,90vw)}}
+</style>
 </head>
 <body>
   <section id="opening" class="opening" aria-label="Заставка Keeper Studio">
@@ -86,7 +105,15 @@ dialog{border:1px solid #7d5a553f;background:radial-gradient(ellipse at top righ
       </div>
       <div id="language" class="language-picker" aria-label="Язык / Language"><button data-language="ru">RU</button><button data-language="en">EN</button></div>
       <button id="share" class="text-button share-button"><span class="x-symbol" aria-hidden="true">𝕏</span><span data-i18n="shareX">Поделиться в X</span></button>
-      <button id="export" class="primary"><span data-icon="download"></span><span data-i18n="download">Скачать PNG</span></button>
+      <div class="download-wrap" id="download-wrap">
+        <button id="download-menu-toggle" class="primary" type="button" aria-haspopup="true" aria-expanded="false"><span data-icon="download"></span><span id="download-menu-label">Скачать</span><span aria-hidden="true">⌄</span></button>
+        <div id="download-menu" class="download-menu" hidden>
+          <button type="button" data-download-format="png"><strong id="download-png-label">Скачать PNG</strong><small id="download-png-hint">Изображение</small></button>
+          <button type="button" data-download-format="mp4"><strong id="download-mp4-label">Скачать MP4</strong><small id="download-mp4-hint">Видео · 3 / 5 / 10 сек</small></button>
+          <button type="button" data-download-format="gif"><strong id="download-gif-label">Скачать GIF</strong><small id="download-gif-hint">Анимация · 3 / 5 сек</small></button>
+        </div>
+      </div>
+      <button id="export" class="primary" hidden><span data-icon="download"></span><span data-i18n="download">Скачать PNG</span></button>
     </div>
   </header>
   <main inert>
@@ -102,7 +129,7 @@ dialog{border:1px solid #7d5a553f;background:radial-gradient(ellipse at top righ
         <div class="canvas-toolbar">
           <button type="button" id="create-story" class="create-story-button" data-i18n="createStory">Начать свой сюжет</button>
           <div class="history-tools"><button id="undo" class="icon-button" data-title="undo"></button><button id="redo" class="icon-button" data-title="redo"></button><span class="toolbar-divider"></span><button id="add-text" class="text-button"><span data-icon="text"></span><span data-i18n="addText">Текст</span></button><button id="animation-toggle" class="text-button" type="button" aria-expanded="false">✦ <span id="animation-label">Анимация</span></button></div>
-          <div id="format-picker" class="segmented" aria-label="Формат холста"></div>
+          <div class="toolbar-right"><label class="toggle-row toolbar-transparent"><span data-i18n="transparent">Прозрачный фон</span><input id="transparent" type="checkbox" role="switch"><span class="switch" aria-hidden="true"></span></label><div id="format-picker" class="segmented" aria-label="Формат холста"></div></div>
         </div>
         <div id="animation-menu" class="animation-menu" hidden><div class="animation-head"><strong id="animation-title">✨ Анимация объекта</strong><button type="button" id="animation-close" aria-label="Close">×</button></div><div class="animation-grid" id="animation-grid"></div><div class="animation-speed-title" id="animation-speed-label">Скорость анимации</div><div id="animation-speed" class="animation-speed"><button type="button" data-animation-speed="slow">Медленно</button><button type="button" data-animation-speed="normal">Обычно</button><button type="button" data-animation-speed="fast">Быстро</button></div><button type="button" id="animation-clear" class="animation-clear">✕ Убрать анимацию</button></div><div class="canvas-area" id="canvas-area">
           <div class="canvas-frame" id="canvas-frame"><canvas id="artboard" width="1080" height="1080" tabindex="0" aria-label="Холст композиции. Нажмите на объект, чтобы выбрать. Стрелки перемещают выбранный объект."></canvas></div>
@@ -122,7 +149,7 @@ dialog{border:1px solid #7d5a553f;background:radial-gradient(ellipse at top righ
           <div class="layers-heading"><h3 data-i18n="layers">Слои</h3><span id="layer-count"></span></div>
           <p class="layer-hint" data-i18n="layerHint">Верхний слой — спереди. Тяните за ⋮⋮, чтобы поменять порядок.</p>
           <div id="layers" class="layers"></div>
-          <div class="background-options"><label class="toggle-row"><span data-i18n="transparent">Прозрачный фон</span><input id="transparent" type="checkbox" role="switch"><span class="switch" aria-hidden="true"></span></label><p data-i18n="transparentHint">Для стикеров и композиций без фона.</p></div>
+          
         </div>
       </aside>
     </section>
@@ -148,7 +175,7 @@ dialog{border:1px solid #7d5a553f;background:radial-gradient(ellipse at top righ
     <button id="confirm-export" class="primary wide"><span data-icon="download"></span><span data-i18n="saveImage">Сохранить картинку</span></button>
     <p class="dialog-footnote" data-i18n="exportFootnote">Рамка выделения и интерфейс в картинку не попадут.</p>
   </dialog>
-  <dialog id="preview-dialog" class="preview-dialog"><form method="dialog" class="dialog-close"><button class="icon-button" aria-label="Закрыть" value="close">×</button></form><canvas id="preview-canvas" role="img" aria-label="Превью вашей композиции"></canvas><img id="preview-image" alt="Превью вашей композиции" hidden><div id="video-export-controls" style="margin-top:15px;display:flex;flex-direction:column;align-items:center;gap:10px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center"><label for="video-duration" id="video-duration-label">Длительность</label><select id="video-duration" style="width:auto;min-width:95px"><option value="3">3 сек</option><option value="5" selected>5 сек</option><option value="10">10 сек</option></select><button id="download-mp4" class="primary" type="button">Скачать MP4</button></div><p id="video-export-status" role="status" aria-live="polite" style="font-size:11px;color:var(--muted);text-align:center;max-width:400px"></p></div></dialog>
+  <dialog id="preview-dialog" class="preview-dialog"><form method="dialog" class="dialog-close"><button class="icon-button" aria-label="Закрыть" value="close">×</button></form><canvas id="preview-canvas" role="img" aria-label="Превью вашей композиции"></canvas><img id="preview-image" alt="Превью вашей композиции" hidden><div id="video-export-controls" style="margin-top:15px;display:flex;flex-direction:column;align-items:center;gap:10px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center"><label for="video-duration" id="video-duration-label">Длительность</label><select id="video-duration" style="width:auto;min-width:95px"><option value="3">3 сек</option><option value="5" selected>5 сек</option><option value="10">10 сек</option></select><button id="download-mp4" class="primary" type="button">Скачать MP4</button></div><div style="display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap"><label for="gif-duration" id="gif-duration-label">GIF:</label><select id="gif-quality" aria-label="Качество GIF" style="width:auto;min-width:125px"><option value="optimized">Discord Optimized</option><option value="high">High Quality</option></select><select id="gif-duration" style="width:auto;min-width:95px"><option value="3">3 сек</option><option value="5" selected>5 сек</option></select><button id="download-gif" class="primary" type="button">Скачать GIF</button></div><p id="gif-export-status" role="status" aria-live="polite" style="font-size:11px;color:var(--muted);text-align:center;max-width:400px"></p><p id="video-export-status" role="status" aria-live="polite" style="font-size:11px;color:var(--muted);text-align:center;max-width:400px"></p></div></dialog>
   <dialog id="about-dialog">
     <form method="dialog" class="dialog-close"><button class="icon-button" aria-label="Закрыть" value="close">×</button></form>
     <span class="eyebrow">KEEPER STUDIO</span><h2>Keeper Studio ✨🐉</h2><article id="about-article" class="about-article"></article>
