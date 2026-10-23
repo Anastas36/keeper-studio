@@ -177,15 +177,15 @@ function drawBackground(ctx,state,W,H,images){
     for(let i=0;i<28;i++){const x=((i*317+139)%997)/997*W;const y=((i*271+91)%991)/991*H;const size=(i%4===0?2:1)*W/1080;ctx.fillStyle=i%3===0?"#f0c68d66":"#eac7a42b";ctx.beginPath();ctx.arc(x,y,size,0,Math.PI*2);ctx.fill();}
   }
 }
-function render(canvas,state,{assets,images,selected=null,scale=1,selection=true,animate=selection,time=null}={}){
-  const {w:W,h:H}=FORMATS[state.format];const targetW=Math.round(W*scale),targetH=Math.round(H*scale);if(canvas.width!==targetW)canvas.width=targetW;if(canvas.height!==targetH)canvas.height=targetH;
-  const ctx=canvas.getContext("2d");ctx.setTransform(scale,0,0,scale,0,0);ctx.clearRect(0,0,W,H);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
+function render(canvas,state,{assets,images,selected=null,scale=1,selection=true}={}){
+  const {w:W,h:H}=FORMATS[state.format];canvas.width=Math.round(W*scale);canvas.height=Math.round(H*scale);
+  const ctx=canvas.getContext("2d");ctx.scale(scale,scale);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
   drawBackground(ctx,state,W,H,images);
   for(const obj of state.objects){
     const b=geometry(ctx,obj,W,H,assets);ctx.save();ctx.translate(b.x,b.y);ctx.rotate(b.angle);
-    if(animate && obj.animation){
+    if(selection && obj.animation){
       const speed = {slow:.55,normal:1,fast:1.65}[obj.animationSpeed] || 1;
-      const t = ((time===null?performance.now():time)/1000)*2*Math.PI*speed;
+      const t = (performance.now()/1000)*2*Math.PI*speed;
       switch(obj.animation){
         case "float": ctx.translate(0,Math.sin(t*.55)*H*.012); break;
         case "bounce": ctx.translate(0,-Math.abs(Math.sin(t*.7))*H*.025); break;
@@ -579,7 +579,7 @@ function updateToolbar(){
   $("#undo").disabled=!history?.canUndo;$("#redo").disabled=!history?.canRedo;
   $("#dimensions").textContent=FORMATS[state.format].w+" × "+FORMATS[state.format].h+" px";
   $("#format-picker").innerHTML=Object.entries(FORMATS).map(([id,f])=>'<button type="button" data-format="'+id+'" class="'+(state.format===id?"active":"")+'" aria-pressed="'+(state.format===id)+'">'+f.label+'</button>').join("");
-  $("#transparent").checked=state.transparent;$("#transparent-top").checked=state.transparent;
+  $("#transparent").checked=state.transparent;
 }
 function commit({inspector=true}={}){
   history.push(state);persist();paint();updateToolbar();if(inspector)renderInspector();syncAnimationMenu();
@@ -778,9 +778,7 @@ $("#selection-properties").addEventListener("click",event=>{
   if(button.dataset.color)o.color=button.dataset.color;
   commit();
 });
-function updateTransparency(value){state.transparent=value;commit();refresh();}
-$("#transparent").addEventListener("change",event=>updateTransparency(event.target.checked));
-$("#transparent-top").addEventListener("change",event=>updateTransparency(event.target.checked));
+$("#transparent").addEventListener("change",event=>{state.transparent=event.target.checked;commit();refresh();});
 $("#add-text").addEventListener("click",()=>{
   if(state.objects.length>=60)return toast(t("limit"));
   const o=textObject(t("newText"),.5,.5,.07);state.objects.push(o);selected=o.id;commit();$("#text-value").focus();$("#text-value").select();
@@ -803,146 +801,29 @@ document.addEventListener("keydown",event=>{
   const o=selectedObject();if(!o)return;const amount=event.shiftKey?.02:.003;
   if(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(event.key)){event.preventDefault();if(event.key==="ArrowLeft")o.x-=amount;if(event.key==="ArrowRight")o.x+=amount;if(event.key==="ArrowUp")o.y-=amount;if(event.key==="ArrowDown")o.y+=amount;o.x=clamp(o.x,-.5,1.5);o.y=clamp(o.y,-.5,1.5);commit();}
 });
-
-
-class KeeperGif{
- constructor(w,h,transparent){this.w=w;this.h=h;this.transparent=transparent;this.bytes=[];const a=this.bytes;
-  const word=n=>a.push(n&255,(n>>8)&255);
-  a.push(...[71,73,70,56,57,97]);word(w);word(h);a.push(0xF7,0,0);
-  for(let i=0;i<256;i++)a.push(((i>>5)&7)*255/7|0,((i>>2)&7)*255/7|0,(i&3)*255/3|0);
-  if(transparent){a[13]=0;a[14]=0;a[15]=0;}
-  a.push(0x21,0xff,11,...new TextEncoder().encode("NETSCAPE2.0"),3,1,0,0,0);
- }
- addFrame(rgba,delay){
-  const a=this.bytes,word=n=>a.push(n&255,(n>>8)&255);
-  const indexed=new Uint8Array(this.w*this.h);
-  for(let p=0,j=0;p<rgba.length;p+=4,j++){
-    if(this.transparent&&rgba[p+3]<128){indexed[j]=0;continue;}
-    let v=((rgba[p]>>5)<<5)|((rgba[p+1]>>5)<<2)|(rgba[p+2]>>6);
-    if(this.transparent&&v===0)v=1;
-    indexed[j]=v;
-  }
-  a.push(0x21,0xF9,4,this.transparent?9:8);word(delay);a.push(0,0);
-  a.push(0x2C);word(0);word(0);word(this.w);word(this.h);a.push(0);
-  a.push(8);
-  const clear=256,end=257,bytes=[];let bitBuf=0,bitCount=0,codeSize=9,next=258;
-  const emit=c=>{bitBuf|=c<<bitCount;bitCount+=codeSize;while(bitCount>=8){bytes.push(bitBuf&255);bitBuf>>>=8;bitCount-=8;}};
-  let dict=new Map();emit(clear);let prev=String(indexed[0]);
-  for(let i=1;i<indexed.length;i++){
-    const curr=indexed[i],key=prev+","+curr;
-    if(dict.has(key)){prev=key;continue;}
-    const code=prev.includes(",")?dict.get(prev):Number(prev);
-    emit(code);
-    if(next<4096){dict.set(key,next++);if(next===(1<<codeSize)&&codeSize<12)codeSize++;}
-    else{emit(clear);dict=new Map();codeSize=9;next=258;}
-    prev=String(curr);
-  }
-  emit(prev.includes(",")?dict.get(prev):Number(prev));emit(end);
-  if(bitCount)bytes.push(bitBuf&255);
-  for(let i=0;i<bytes.length;i+=255){const part=bytes.slice(i,i+255);a.push(part.length,...part);}
-  a.push(0);
- }
- finish(){this.bytes.push(0x3B);return new Uint8Array(this.bytes);}
-}
-
 async function exportCanvas(){await ensureImages(state);const output=document.createElement("canvas");render(output,state,{assets,images,selection:false});return output;}
-const exportType=$("#export-type"), exportOptions=$("#export-motion-options");
-function syncExportControls(){
-  const ru=(document.documentElement.lang||"ru").startsWith("ru"),kind=exportType.value;
-  exportOptions.hidden=kind==="png";
-  $("#export-type-display").textContent=kind.toUpperCase();
-  $("#export-format-label").textContent=ru?"Формат":"Format";
-  $("#export-duration-label").textContent=ru?"Длительность":"Duration";
-  $("#export-resolution-label").textContent=ru?"Размер":"Size";
-  $("#export-motion-note").textContent=kind==="gif"?(ru?"GIF без звука, повторяется по кругу. Для Discord рекомендуем 320 или 512 px.":"Silent looping GIF. 320 or 512 px recommended for Discord."):(ru?"Видео WebM без музыки. Формат MP4 пока не поддерживается.":"Silent WebM video. MP4 is not supported yet.");
-  [...exportType.options].forEach(o=>o.textContent=({png:ru?"PNG — картинка":"PNG — image",gif:ru?"GIF — Discord":"GIF — Discord",webm:ru?"WebM — видео":"WebM — video"})[o.value]);
-  [...$("#export-duration").options].forEach(o=>o.textContent=o.value+(ru?" секунд":" seconds"));
-  [...$("#export-resolution").options].forEach(o=>o.textContent=o.value==="original"?(ru?"Исходный размер":"Original size"):o.value+" px");
-  $("#confirm-export").querySelector("[data-i18n]")?.removeAttribute("data-i18n");
-  $("#confirm-export").textContent=ru?"Скачать "+kind.toUpperCase():"Download "+kind.toUpperCase();
-}
-exportType.addEventListener("change",syncExportControls);
 $("#export").addEventListener("click",()=>{
   $("#export-size").textContent=FORMATS[state.format].w+" × "+FORMATS[state.format].h;
-  $("#export-bg").textContent=t(state.transparent?"transparentShort":"opaque");
-  syncExportControls();$("#export-dialog").showModal();
+  $("#export-bg").textContent=t(state.transparent?"transparentShort":"opaque");$("#export-dialog").showModal();
 });
-function exportDimensions(){
-  const {w,h}=FORMATS[state.format],option=$("#export-resolution").value;
-  const factor=option==="original"?1:Math.min(1,Number(option)/Math.max(w,h));
-  return {width:Math.max(1,Math.round(w*factor)),height:Math.max(1,Math.round(h*factor)),scale:factor};
-}
-function downloadBlob(blob,extension){
-  const url=URL.createObjectURL(blob),a=document.createElement("a");
-  a.href=url;a.download=($("#file-name").value.replace(/[<>:"/\\|?*\u0000-\u001f]/g,"").trim()||"keeper-story")+"."+extension;
-  document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
-}
 async function downloadImage(button){
   const original=button.innerHTML;button.disabled=true;button.textContent=t("generating");
   try{
-    const output=await exportCanvas(),blob=await new Promise(resolve=>output.toBlob(resolve,"image/png"));
-    if(!blob)throw Error("PNG encoding failed");
-    downloadBlob(blob,"png");toast(t("exportSuccess"));return true;
-  }catch(error){console.error(error);toast(t("exportError"));return false;}
+    const output=await exportCanvas();const blob=await new Promise(resolve=>output.toBlob(resolve,"image/png"));if(!blob)throw Error("PNG encoding failed");
+    const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=($("#file-name").value.replace(/[<>:"/\\|?*\u0000-\u001f]/g,"").trim()||"keeper-story")+".png";document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);toast(t("exportSuccess"));return true;
+  }catch{toast(t("exportError"));return false;}
   finally{button.disabled=false;button.innerHTML=original;}
 }
-async function downloadMotion(button){
-  const original=button.innerHTML,kind=exportType.value,duration=Number($("#export-duration").value);
-  button.disabled=true;button.textContent=t("generating");
-  try{
-    await ensureImages(state);
-    const dims=exportDimensions(),output=document.createElement("canvas");
-    const renderFrame=(ms)=>render(output,state,{assets,images,selection:false,animate:true,time:ms,scale:dims.scale});
-    if(kind==="gif"){
-      // Indexed-color GIF: 3-3-2 quantization, optional transparent index 0.
-      const fps=10,delay=10,frames=Math.round(duration*fps),gif=new KeeperGif(dims.width,dims.height,state.transparent);
-      for(let i=0;i<frames;i++){
-        renderFrame(i*1000/fps);
-        gif.addFrame(output.getContext("2d").getImageData(0,0,dims.width,dims.height).data,delay);
-        if(i%4===0){button.textContent=Math.round((i+1)/frames*100)+"%";await new Promise(r=>setTimeout(r,0));}
-      }
-      downloadBlob(new Blob([gif.finish()],{type:"image/gif"}),"gif");
-    }else{
-      if(!window.MediaRecorder||!output.captureStream)throw Error("Video recording unsupported");
-      renderFrame(0);
-      const mime=["video/webm;codecs=vp9","video/webm;codecs=vp8","video/webm"].find(m=>MediaRecorder.isTypeSupported(m));
-      if(!mime)throw Error("WebM unsupported");
-      const stream=output.captureStream(30),chunks=[],recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:2500000});
-      const done=new Promise((resolve,reject)=>{recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};recorder.onerror=reject;recorder.onstop=resolve;});
-      recorder.start();
-      const start=performance.now();
-      await new Promise(resolve=>{
-        function tick(now){renderFrame(Math.min(duration*1000,now-start));if(now-start<duration*1000)requestAnimationFrame(tick);else resolve();}
-        requestAnimationFrame(tick);
-      });
-      recorder.stop();await done;stream.getTracks().forEach(track=>track.stop());
-      if(!chunks.length)throw Error("Empty video");
-      downloadBlob(new Blob(chunks,{type:mime}),"webm");
-    }
-    toast(t("exportSuccess"));return true;
-  }catch(error){console.error(error);toast(t("exportError"));return false;}
-  finally{button.disabled=false;button.innerHTML=original;}
-}
-$("#confirm-export").addEventListener("click",async()=>{
-  const kind=exportType.value;
-  if(await(kind==="png"?downloadImage($("#confirm-export")):downloadMotion($("#confirm-export"))))$("#export-dialog").close();
-});
+$("#confirm-export").addEventListener("click",async()=>{if(await downloadImage($("#confirm-export")))$("#export-dialog").close();});
 function renderShareOptions(){const select=$("#share-template"),value=select.value||"story";select.innerHTML=Object.keys(SHARE_TEMPLATES).map(id=>'<option value="'+id+'">'+escape(t("share"+id[0].toUpperCase()+id.slice(1)))+'</option>').join("");select.value=value;}
 function updateShareLink(){const publicUrl=location.hostname.endsWith(".github.io")?location.origin+location.pathname.replace(/index\.html$/i,""):"";$("#share-open").href=shareIntent($("#share-text").value,publicUrl);}
 $("#share").addEventListener("click",()=>{renderShareOptions();if(!$("#share-text").value)$("#share-text").value=SHARE_TEMPLATES[$("#share-template").value];updateShareLink();$("#share-dialog").showModal();});
 $("#share-template").addEventListener("change",()=>{$("#share-text").value=SHARE_TEMPLATES[$("#share-template").value];updateShareLink();});
 $("#share-text").addEventListener("input",updateShareLink);$("#share-download").addEventListener("click",()=>downloadImage($("#share-download")));
-let previewAnimationId=null;
 $("#preview").addEventListener("click",async()=>{
-  try{
-    await ensureImages(state);
-    $("#preview-dialog").showModal();
-    const target=$("#preview-canvas");
-    const frame=()=>{if(!$("#preview-dialog").open)return;render(target,state,{assets,images,selection:false,animate:true});previewAnimationId=requestAnimationFrame(frame);};
-    frame();
-  }catch(error){console.error(error);toast(t("exportError"));}
+  try{const output=await exportCanvas();const blob=await new Promise(resolve=>output.toBlob(resolve,"image/png"));if(previewURL)URL.revokeObjectURL(previewURL);previewURL=URL.createObjectURL(blob);$("#preview-image").src=previewURL;$("#preview-dialog").showModal();}catch{toast(t("exportError"));}
 });
-$("#preview-dialog").addEventListener("close",()=>{if(previewAnimationId!==null){cancelAnimationFrame(previewAnimationId);previewAnimationId=null;}});
+$("#preview-dialog").addEventListener("close",()=>{if(previewURL){URL.revokeObjectURL(previewURL);previewURL=null;$("#preview-image").removeAttribute("src");}});
 document.querySelectorAll("dialog").forEach(dialog=>dialog.addEventListener("click",event=>{if(event.target===dialog&&!dialog.hasAttribute("data-no-backdrop-dismiss")){const r=dialog.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)dialog.close();}}));
 window.addEventListener("resize",fitCanvas);new ResizeObserver(fitCanvas).observe($("#canvas-area"));
 document.querySelectorAll("[data-icon]").forEach(el=>el.innerHTML=icon(el.dataset.icon));
