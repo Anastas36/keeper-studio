@@ -177,13 +177,13 @@ function drawBackground(ctx,state,W,H,images){
     for(let i=0;i<28;i++){const x=((i*317+139)%997)/997*W;const y=((i*271+91)%991)/991*H;const size=(i%4===0?2:1)*W/1080;ctx.fillStyle=i%3===0?"#f0c68d66":"#eac7a42b";ctx.beginPath();ctx.arc(x,y,size,0,Math.PI*2);ctx.fill();}
   }
 }
-function render(canvas,state,{assets,images,selected=null,scale=1,selection=true}={}){
+function render(canvas,state,{assets,images,selected=null,scale=1,selection=true,animate=selection}={}){
   const {w:W,h:H}=FORMATS[state.format];canvas.width=Math.round(W*scale);canvas.height=Math.round(H*scale);
   const ctx=canvas.getContext("2d");ctx.scale(scale,scale);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
   drawBackground(ctx,state,W,H,images);
   for(const obj of state.objects){
     const b=geometry(ctx,obj,W,H,assets);ctx.save();ctx.translate(b.x,b.y);ctx.rotate(b.angle);
-    if(selection && obj.animation){
+    if(animate && obj.animation){
       const speed = {slow:.55,normal:1,fast:1.65}[obj.animationSpeed] || 1;
       const t = (performance.now()/1000)*2*Math.PI*speed;
       switch(obj.animation){
@@ -498,6 +498,7 @@ const t=key=>copy[lang][key]||key;
 const escape=value=>String(value).replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 let catalog=[],assets=new Map(),images=new Map(),pending=new Map(),thumbImages=new Map(),thumbAssets=new Map(),templatePreviews=new Map();
 let state=makeTemplate("gm"),history,selected=state.objects[1].id,tab="templates",hero="blinky",templateFilter="all",drag=null,layerDrag=null,currentHint="tip",toastTimer,saveTimer,refreshTicket=0,previewURL=null;
+let previewFrameId=0,previewLastFrame=0;
 const canvas=$("#artboard");
 const selectedObject=()=>state.objects.find(o=>o.id===selected);
 function assetName(a){
@@ -820,10 +821,105 @@ function updateShareLink(){const publicUrl=location.hostname.endsWith(".github.i
 $("#share").addEventListener("click",()=>{renderShareOptions();if(!$("#share-text").value)$("#share-text").value=SHARE_TEMPLATES[$("#share-template").value];updateShareLink();$("#share-dialog").showModal();});
 $("#share-template").addEventListener("change",()=>{$("#share-text").value=SHARE_TEMPLATES[$("#share-template").value];updateShareLink();});
 $("#share-text").addEventListener("input",updateShareLink);$("#share-download").addEventListener("click",()=>downloadImage($("#share-download")));
+// Live preview: separate canvas, no selection handles. The PNG export path is untouched.
+function drawLivePreview(timestamp){
+  if(!$("#preview-dialog").open)return;
+  if(timestamp-previewLastFrame>=1000/30){
+    render($("#preview-canvas"),state,{assets,images,selection:false,animate:true});
+    previewLastFrame=timestamp;
+  }
+  previewFrameId=requestAnimationFrame(drawLivePreview);
+}
 $("#preview").addEventListener("click",async()=>{
-  try{const output=await exportCanvas();const blob=await new Promise(resolve=>output.toBlob(resolve,"image/png"));if(previewURL)URL.revokeObjectURL(previewURL);previewURL=URL.createObjectURL(blob);$("#preview-image").src=previewURL;$("#preview-dialog").showModal();}catch{toast(t("exportError"));}
+  try{
+    await ensureImages(state);
+    $("#preview-dialog").showModal();
+    previewLastFrame=-Infinity;
+    cancelAnimationFrame(previewFrameId);
+    previewFrameId=requestAnimationFrame(drawLivePreview);
+  }catch(error){console.error("Live preview failed",error);toast(t("exportError"));}
 });
-$("#preview-dialog").addEventListener("close",()=>{if(previewURL){URL.revokeObjectURL(previewURL);previewURL=null;$("#preview-image").removeAttribute("src");}});
+$("#preview-dialog").addEventListener("close",()=>{cancelAnimationFrame(previewFrameId);previewFrameId=0;});
+
+// MP4 is exported only when this browser exposes a real MP4 MediaRecorder encoder.
+// Do not mislabel WebM data as .mp4. The stable PNG export is unchanged.
+const mp4Mimes=["video/mp4;codecs=avc1.42E01E","video/mp4;codecs=avc1","video/mp4"];
+function supportedMP4(){
+  if(typeof MediaRecorder==="undefined"||typeof MediaRecorder.isTypeSupported!=="function")return null;
+  return mp4Mimes.find(m=>MediaRecorder.isTypeSupported(m))||null;
+}
+const mp4Button=$("#download-mp4"),mp4Status=$("#video-export-status");
+let recordingMP4=false;
+function videoLabel(key){
+ const ru={duration:"Длительность",download:"Скачать MP4",unsupported:"Этот Chrome не поддерживает запись MP4. Файл другого формата под видом MP4 сохранять не будем.",ready:"Видео без звука. MP4 зависит от поддержки браузера.",recording:"Запись видео…",finished:"MP4 сохранён.",error:"Не удалось записать MP4. Попробуйте другой браузер или обновите Chrome."};
+ const en={duration:"Duration",download:"Download MP4",unsupported:"This Chrome cannot record MP4. We won't save another format with an MP4 extension.",ready:"Silent video. MP4 availability depends on your browser.",recording:"Recording video…",finished:"MP4 saved.",error:"Could not record MP4. Try another browser or update Chrome."};
+ return (document.documentElement.lang==="en"?en:ru)[key];
+}
+function refreshMP4Controls(){
+ $("#video-duration-label").textContent=videoLabel("duration");
+ mp4Button.textContent=videoLabel("download");
+ for(const o of $("#video-duration").options)o.textContent=o.value+(document.documentElement.lang==="en"?" sec":" сек");
+ const mime=supportedMP4();
+ mp4Button.disabled=!mime||recordingMP4;
+ if(!recordingMP4)mp4Status.textContent=videoLabel(mime?"ready":"unsupported");
+}
+$("#preview-dialog").addEventListener("close",()=>{if(!recordingMP4)refreshMP4Controls();});
+mp4Button.addEventListener("click",async()=>{
+ if(recordingMP4)return;
+ const mime=supportedMP4();if(!mime){refreshMP4Controls();return;}
+ recordingMP4=true;mp4Button.disabled=true;
+ const duration=Number($("#video-duration").value)||5;
+ mp4Status.textContent=videoLabel("recording")+" 0 / "+duration+" s";
+ let stream=null,recorder=null,frameId=0,stopTimer=0;
+ try{
+   await ensureImages(state);
+   // Keep the captured canvas dimensions fixed. render() resets its own canvas size.
+   const format=FORMATS[state.format];
+   const capture=document.createElement("canvas");capture.width=format.w;capture.height=format.h;
+   const cctx=capture.getContext("2d",{alpha:false});
+   const scratch=document.createElement("canvas");
+   const snapshot=JSON.parse(JSON.stringify(state));
+   render(scratch,snapshot,{assets,images,selection:false,animate:true});
+   cctx.drawImage(scratch,0,0);
+   stream=capture.captureStream(30);
+   recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:3500000});
+   const chunks=[];
+   const completed=new Promise((resolve,reject)=>{
+     recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};
+     recorder.onerror=e=>reject(e.error||new Error("Recorder error"));
+     recorder.onstop=()=>resolve(new Blob(chunks,{type:"video/mp4"}));
+   });
+   const started=performance.now();let lastFrame=-Infinity;
+   const frame=now=>{
+     if(now-started>=duration*1000)return;
+     if(now-lastFrame>=1000/30){
+       render(scratch,snapshot,{assets,images,selection:false,animate:true});
+       cctx.clearRect(0,0,capture.width,capture.height);
+       cctx.drawImage(scratch,0,0);
+       lastFrame=now;
+       mp4Status.textContent=videoLabel("recording")+" "+Math.min(duration,Math.floor((now-started)/1000))+" / "+duration+" s";
+     }
+     frameId=requestAnimationFrame(frame);
+   };
+   recorder.start(250);
+   frameId=requestAnimationFrame(frame);
+   stopTimer=setTimeout(()=>{cancelAnimationFrame(frameId);if(recorder.state!=="inactive")recorder.stop();},duration*1000);
+   const blob=await completed;
+   if(!blob.size)throw Error("Empty MP4");
+   const url=URL.createObjectURL(blob),a=document.createElement("a");
+   a.href=url;a.download="keeper-animation-"+duration+"s.mp4";document.body.append(a);a.click();a.remove();
+   setTimeout(()=>URL.revokeObjectURL(url),30000);
+   mp4Status.textContent=videoLabel("finished");
+ }catch(error){console.error("MP4 export failed",error);mp4Status.textContent=videoLabel("error");}
+ finally{
+   clearTimeout(stopTimer);cancelAnimationFrame(frameId);
+   if(recorder&&recorder.state!=="inactive")try{recorder.stop();}catch{}
+   if(stream)stream.getTracks().forEach(track=>track.stop());
+   recordingMP4=false;mp4Button.disabled=!supportedMP4();
+ }
+});
+refreshMP4Controls();
+
 document.querySelectorAll("dialog").forEach(dialog=>dialog.addEventListener("click",event=>{if(event.target===dialog&&!dialog.hasAttribute("data-no-backdrop-dismiss")){const r=dialog.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)dialog.close();}}));
 window.addEventListener("resize",fitCanvas);new ResizeObserver(fitCanvas).observe($("#canvas-area"));
 document.querySelectorAll("[data-icon]").forEach(el=>el.innerHTML=icon(el.dataset.icon));
