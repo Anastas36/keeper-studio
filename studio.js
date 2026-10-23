@@ -652,6 +652,8 @@ function renderLibrary(){
 }
 function localize(){
   document.documentElement.lang=lang;
+  syncAnimationMenu();
+  localizeDownloadMenu();
   document.querySelectorAll("[data-i18n]").forEach(el=>{const value=t(el.dataset.i18n);if(el.dataset.i18n==="kitNote")el.innerHTML=value;else el.textContent=value;});
   document.querySelectorAll("[data-title]").forEach(el=>{el.title=t(el.dataset.title);el.setAttribute("aria-label",t(el.dataset.title));});
   document.querySelectorAll("[data-language]").forEach(button=>{const active=button.dataset.language===lang;button.classList.toggle("active",active);button.setAttribute("aria-pressed",String(active));});$("#artboard").setAttribute("aria-label",t("canvasLabel"));
@@ -803,6 +805,28 @@ document.addEventListener("keydown",event=>{
   if(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(event.key)){event.preventDefault();if(event.key==="ArrowLeft")o.x-=amount;if(event.key==="ArrowRight")o.x+=amount;if(event.key==="ArrowUp")o.y-=amount;if(event.key==="ArrowDown")o.y+=amount;o.x=clamp(o.x,-.5,1.5);o.y=clamp(o.y,-.5,1.5);commit();}
 });
 async function exportCanvas(){await ensureImages(state);const output=document.createElement("canvas");render(output,state,{assets,images,selection:false});return output;}
+// Header download menu: existing PNG dialog and existing live Preview exporters are reused.
+function localizeDownloadMenu(){
+  const ru=lang!=="en";
+  const labels=ru?{
+    main:"Скачать",png:"Скачать PNG",mp4:"Скачать MP4",gif:"Скачать GIF",
+    pngHint:"Изображение",mp4Hint:"Видео · 3 / 5 / 10 сек",gifHint:"Анимация · 3 / 5 сек"
+  }:{main:"Download",png:"Download PNG",mp4:"Download MP4",gif:"Download GIF",
+    pngHint:"Image",mp4Hint:"Video · 3 / 5 sec / 10 sec",gifHint:"Animation · 3 / 5 sec"};
+  for(const [id,key] of Object.entries({"download-menu-label":"main","download-png-label":"png","download-mp4-label":"mp4","download-gif-label":"gif","download-png-hint":"pngHint","download-mp4-hint":"mp4Hint","download-gif-hint":"gifHint"})){
+    const el=document.getElementById(id);if(el)el.textContent=labels[key];
+  }
+}
+function closeDownloadMenu(){const menu=document.getElementById("download-menu"),button=document.getElementById("download-menu-toggle");menu.hidden=true;button.setAttribute("aria-expanded","false");}
+$("#download-menu-toggle").addEventListener("click",()=>{const menu=$("#download-menu");menu.hidden=!menu.hidden;$("#download-menu-toggle").setAttribute("aria-expanded",String(!menu.hidden));});
+$("#download-menu").addEventListener("click",event=>{
+  const choice=event.target.closest("[data-download-format]");if(!choice)return;
+  const format=choice.dataset.downloadFormat;closeDownloadMenu();
+  if(format==="png")$("#export").click();
+  else $("#preview").click();
+});
+document.addEventListener("click",event=>{if(!event.target.closest("#download-wrap"))closeDownloadMenu();});
+document.addEventListener("keydown",event=>{if(event.key==="Escape")closeDownloadMenu();});
 $("#export").addEventListener("click",()=>{
   $("#export-size").textContent=FORMATS[state.format].w+" × "+FORMATS[state.format].h;
   $("#export-bg").textContent=t(state.transparent?"transparentShort":"opaque");$("#export-dialog").showModal();
@@ -954,6 +978,88 @@ async function init(){
   }catch(error){$("#loading").hidden=true;toast(t("imageError"));$("#library-description").textContent=t("imageError");}
 }
 init();
+
+/* Standalone GIF export: editor and MP4 code are unchanged. */
+(()=>{'use strict';
+const btn=document.querySelector('#download-gif'),msg=document.querySelector('#gif-export-status');if(!btn)return;
+function u16(a,n){a.push(n&255,n>>8&255)}
+function lzw(p){const dict=new Map(),out=[];let size=9,next=258,prev=-1,bits=0,count=0;
+function write(n){bits|=n<<count;count+=size;while(count>=8){out.push(bits&255);bits>>>=8;count-=8}}
+write(256);for(const v of p){if(prev<0){prev=v;continue}const key=prev*256+v,found=dict.get(key);if(found!==undefined){prev=found;continue}write(prev);if(next<4096){dict.set(key,next++);if(next>(1<<size)&&size<12)size++}else{write(256);dict.clear();next=258;size=9}prev=v}if(prev>=0)write(prev);write(257);if(count)out.push(bits&255);return out}
+function paletteFor(frames){
+// Build a shared, image-adaptive 255-color palette from sampled pixels across
+// the entire animation; palette slot 0 is reserved for transparency.
+const bins=new Map();
+for(const frame of frames){const d=frame.data;const step=Math.max(1,Math.floor((d.length/4)/18000));for(let j=0;j<d.length/4;j+=step){const i=j*4;if(d[i+3]<128)continue;const r=d[i]>>3,g=d[i+1]>>3,b=d[i+2]>>3,key=(r<<10)|(g<<5)|b;let v=bins.get(key);if(v)v[0]++;else bins.set(key,[1,(r<<3)+4,(g<<3)+4,(b<<3)+4]);}}
+let boxes=[Array.from(bins.values())];
+function stats(box){let lo=[255,255,255],hi=[0,0,0],total=0;for(const v of box){total+=v[0];for(let k=0;k<3;k++){lo[k]=Math.min(lo[k],v[k+1]);hi[k]=Math.max(hi[k],v[k+1]);}}return {lo,hi,total,range:hi.map((x,k)=>x-lo[k])}}
+while(boxes.length<255){let best=-1,score=-1;for(let i=0;i<boxes.length;i++){if(boxes[i].length<2)continue;const st=stats(boxes[i]),v=Math.max(...st.range)*Math.sqrt(st.total);if(v>score){score=v;best=i;}}if(best<0)break;const box=boxes[best],st=stats(box),channel=st.range.indexOf(Math.max(...st.range))+1;box.sort((a,b)=>a[channel]-b[channel]);let acc=0,split=0;for(;split<box.length-1;split++){acc+=box[split][0];if(acc>=st.total/2){split++;break;}}split=Math.max(1,Math.min(box.length-1,split));boxes.splice(best,1,box.slice(0,split),box.slice(split));}
+const palette=[[0,0,0]];for(const box of boxes){let total=0,r=0,g=0,b=0;for(const v of box){total+=v[0];r+=v[0]*v[1];g+=v[0]*v[2];b+=v[0]*v[3];}palette.push([Math.round(r/total),Math.round(g/total),Math.round(b/total)]);}while(palette.length<256)palette.push([0,0,0]);return palette;
+}
+function indexed(frame,palette,cache){const d=frame.data,p=new Uint8Array(d.length/4);for(let i=0,j=0;i<d.length;i+=4,j++){
+if(d[i+3]<128){p[j]=0;continue;}
+// Composite semi-transparent edge pixels against their nearest opaque colors;
+// GIF supports binary transparency only.
+const r=d[i],g=d[i+1],b=d[i+2],key=((r>>3)<<10)|((g>>3)<<5)|(b>>3);let idx=cache.get(key);if(idx===undefined){let best=Infinity;idx=1;for(let k=1;k<palette.length;k++){const q=palette[k],dr=r-q[0],dg=g-q[1],db=b-q[2],dist=dr*dr*0.30+dg*dg*0.59+db*db*0.11;if(dist<best){best=dist;idx=k;}}cache.set(key,idx);}p[j]=idx;
+}return p}
+// HQ mode: serpentine Floyd-Steinberg diffusion on RGB values. Keep the
+// original indexed() converter for Discord Optimized as a safe fallback.
+function indexedDither(frame,palette,w,h){
+ const d=frame.data,out=new Uint8Array(w*h);
+ let cur=new Float32Array((w+2)*3),next=new Float32Array((w+2)*3);
+ const colorCache=new Map();
+ for(let y=0;y<h;y++){
+  const dir=(y&1)?-1:1;
+  for(let x=dir===1?0:w-1;dir===1?x<w:x>=0;x+=dir){
+   const j=y*w+x,i=j*4,e=(x+1)*3;
+   if(d[i+3]<128){out[j]=0;continue;}
+   const r=Math.max(0,Math.min(255,d[i]+cur[e])),g=Math.max(0,Math.min(255,d[i+1]+cur[e+1])),b=Math.max(0,Math.min(255,d[i+2]+cur[e+2]));
+   const key=((r|0)>>2<<12)|(((g|0)>>2)<<6)|((b|0)>>2);
+   let idx=colorCache.get(key);
+   if(idx===undefined){let best=Infinity;idx=1;
+    for(let k=1;k<palette.length;k++){
+     const q=palette[k],dr=r-q[0],dg=g-q[1],db=b-q[2],dist=dr*dr*.30+dg*dg*.59+db*db*.11;
+     if(dist<best){best=dist;idx=k;}
+    }
+    colorCache.set(key,idx);
+   }
+   out[j]=idx;const q=palette[idx];
+   const er=Math.max(-64,Math.min(64,r-q[0])),eg=Math.max(-64,Math.min(64,g-q[1])),eb=Math.max(-64,Math.min(64,b-q[2]));
+   function add(buf,xx,weight){if(xx<0||xx>=w)return;
+    const ni=(y+(buf===next?1:0))*w+xx;if(ni>=w*h||d[ni*4+3]<128)return;
+    const o=(xx+1)*3;buf[o]+=er*weight;buf[o+1]+=eg*weight;buf[o+2]+=eb*weight;}
+   add(cur,x+dir,7/16);add(next,x-dir,3/16);add(next,x,5/16);add(next,x+dir,1/16);
+  }
+  const swap=cur;cur=next;next=swap;next.fill(0);
+ }
+ return out;
+}
+function encode(frames,w,h,palette,fps){const a=[71,73,70,56,57,97];u16(a,w);u16(a,h);a.push(247,0,0);for(const c of palette)a.push(...c);
+a.push(33,255,11,...Array.from('NETSCAPE2.0',c=>c.charCodeAt(0)),3,1,0,0,0);
+for(const f of frames){a.push(33,249,4,9);u16(a,Math.round(100/fps));a.push(0,0,44);u16(a,0);u16(a,0);u16(a,w);u16(a,h);a.push(0,8);const bytes=lzw(f);for(let i=0;i<bytes.length;i+=255){const chunk=bytes.slice(i,i+255);a.push(chunk.length,...chunk)}a.push(0)}a.push(59);return new Blob([Uint8Array.from(a)],{type:'image/gif'})}
+let busy=false;btn.addEventListener('click',async()=>{if(busy)return;busy=true;btn.disabled=true;const seconds=document.querySelector('#gif-duration').value==='3'?3:5;const high=document.querySelector('#gif-quality')?.value==='high';const fps=high?15:12;const maxEdge=high?640:520;try{
+const snapshot=JSON.parse(JSON.stringify(state));
+// Local file:// images taint canvases in Chrome. The already embedded data-URL
+// thumbnails are safe to read; use them only for offline GIF export.
+// On GitHub Pages, use the original full-resolution, same-origin artwork.
+const offline=location.protocol==='file:';
+await ensureImages(snapshot,offline);
+let gifAssets=offline?thumbAssets:assets,gifImages=offline?thumbImages:images;
+if(high&&offline){
+ const full=globalThis.__keeperGifFull||{},loaded=new Map();
+ await Promise.all(usedAssets(snapshot).map(id=>new Promise((resolve,reject)=>{
+  const url=full[id];if(!url){reject(Error('Missing HQ image: '+id));return;}
+  const im=new Image();im.onload=()=>{loaded.set(id,im);resolve();};im.onerror=()=>reject(Error('Cannot load HQ image '+id));im.src=url;
+ })));
+ gifAssets=assets;gifImages=loaded;
+}
+const f=FORMATS[snapshot.format],s=Math.min(1,maxEdge/Math.max(f.w,f.h)),w=Math.round(f.w*s),h=Math.round(f.h*s);
+const c=document.createElement('canvas');c.width=w;c.height=h;
+const ctx=c.getContext('2d',{willReadFrequently:true}),scratch=document.createElement('canvas'),frames=[];const start=performance.now();
+for(let i=0;i<seconds*fps;i++){const wait=start+i*(1000/fps)-performance.now();if(wait>0)await new Promise(r=>setTimeout(r,wait));render(scratch,snapshot,{assets:gifAssets,images:gifImages,selection:false,animate:true});ctx.clearRect(0,0,w,h);ctx.drawImage(scratch,0,0,w,h);frames.push(ctx.getImageData(0,0,w,h));if(i%6===0)msg.textContent=`GIF: ${i+1}/${seconds*fps}`;await new Promise(r=>setTimeout(r,0))}
+msg.textContent='Encoding GIF…';await new Promise(r=>setTimeout(r,0));const palette=paletteFor(frames),cache=new Map(),indexedFrames=frames.map(frame=>high?indexedDither(frame,palette,w,h):indexed(frame,palette,cache));frames.length=0;const blob=encode(indexedFrames,w,h,palette,fps),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`keeper-animation-${high?"high-quality":"discord"}-${seconds}s.gif`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);msg.textContent=`GIF готов: ${(blob.size/1048576).toFixed(1)} МБ`;
+}catch(e){console.error('GIF export failed:',e);msg.textContent='Ошибка GIF: '+(e?.message||String(e))}finally{busy=false;btn.disabled=false}});
+})();
 
 return {};
 })();
