@@ -183,6 +183,16 @@ function render(canvas,state,{assets,images,selected=null,scale=1,selection=true
   drawBackground(ctx,state,W,H,images);
   for(const obj of state.objects){
     const b=geometry(ctx,obj,W,H,assets);ctx.save();ctx.translate(b.x,b.y);ctx.rotate(b.angle);
+    if(selection && obj.animation){
+      const t=(performance.now()/1000)*2*Math.PI;
+      switch(obj.animation){
+        case "float":ctx.translate(0,Math.sin(t*.55)*H*.012);break;
+        case "bounce":ctx.translate(0,-Math.abs(Math.sin(t*.7))*H*.025);break;
+        case "pulse":{const s=1+.055*Math.sin(t*.65);ctx.scale(s,s);break;}
+        case "sway":ctx.rotate(Math.sin(t*.55)*.095);break;
+        case "fade":ctx.globalAlpha=.58+.42*(.5+.5*Math.sin(t*.5));break;
+      }
+    }
     if(obj.type==="image"){
       const a=assets.get(obj.asset),im=images.get(obj.asset);
       if(a&&im){const [x,y,r,bt]=a.category==="stickers"?[0,0,im.naturalWidth,im.naturalHeight]:a.box;ctx.drawImage(im,x,y,r-x,bt-y,-b.w/2,-b.h/2,b.w,b.h);}
@@ -498,6 +508,25 @@ function persist(){
   },300);
 }
 function paint(){render(canvas,state,{assets,images,selected});}
+const animationEffects=[["float","↟","Парение","Float"],["bounce","↥","Прыжок","Bounce"],["pulse","◉","Пульс","Pulse"],["sway","↶","Покачивание","Sway"],["fade","◐","Появление","Fade"]];
+let animationOpen=false;
+function syncAnimationMenu(){
+  const o=selectedObject(),ru=document.documentElement.lang!=="en";
+  $("#animation-label").textContent=ru?"Анимация":"Animate";
+  $("#animation-title").textContent=ru?"✨ Анимация объекта":"✨ Object animation";
+  $("#animation-toggle").classList.toggle("has-animation",!!o?.animation);
+  $("#animation-toggle").disabled=!o;
+  $("#animation-toggle").setAttribute("aria-expanded",String(animationOpen&&!!o));
+  $("#animation-menu").hidden=!animationOpen||!o;
+  $("#animation-grid").innerHTML=animationEffects.map(([id,symbol,name,en])=>`<button type="button" class="animation-effect ${o?.animation===id?"active":""}" data-animation="${id}" aria-pressed="${o?.animation===id}"><span>${symbol}</span>${ru?name:en}${o?.animation===id?" ✓":""}</button>`).join("");
+  $("#animation-clear").textContent=ru?"✕ Убрать анимацию":"✕ Remove animation";
+  $("#animation-clear").disabled=!o?.animation;
+}
+$("#animation-toggle").addEventListener("click",()=>{animationOpen=!animationOpen;syncAnimationMenu();});
+$("#animation-close").addEventListener("click",()=>{animationOpen=false;syncAnimationMenu();});
+$("#animation-grid").addEventListener("click",e=>{const btn=e.target.closest("[data-animation]");const o=selectedObject();if(!btn||!o)return;o.animation=btn.dataset.animation;commit();syncAnimationMenu();});
+$("#animation-clear").addEventListener("click",()=>{const o=selectedObject();if(!o)return;delete o.animation;commit();syncAnimationMenu();});
+(function animateFrame(){if(state.objects.some(o=>o.animation)&&!document.hidden)paint();requestAnimationFrame(animateFrame);})();
 function fitCanvas(){
   const area=$("#canvas-area"),{w,h}=FORMATS[state.format];
   const padding=innerWidth<=620?40:48;
@@ -512,7 +541,7 @@ function updateToolbar(){
   $("#transparent").checked=state.transparent;
 }
 function commit({inspector=true}={}){
-  history.push(state);persist();paint();updateToolbar();if(inspector)renderInspector();
+  history.push(state);persist();paint();updateToolbar();if(inspector)renderInspector();syncAnimationMenu();
 }
 function loadImage(id,thumb=false){
   const cache=thumb?thumbImages:images,key=(thumb?"thumb:":"full:")+id;
@@ -591,7 +620,7 @@ function localize(){
   $("#about-article").innerHTML=ABOUT_COPY[lang];
   $("#save-status").textContent=t("saved");showHint(currentHint);musicUI.localize();opening.localize();counterUI.localize();renderShareOptions();renderLibrary();renderInspector();
 }
-function selectObject(id){selected=id;paint();renderInspector();const o=selectedObject();showHint(o?(o.type==="text"?"hintText":"hintImage"):"tip");}
+function selectObject(id){selected=id;paint();renderInspector();syncAnimationMenu();const o=selectedObject();showHint(o?(o.type==="text"?"hintText":"hintImage"):"tip");}
 async function addAsset(id){
   if(state.objects.length>=60)return toast(t("limit"));
   const a=assets.get(id);if(!a)return;
