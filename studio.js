@@ -654,6 +654,7 @@ function localize(){
   document.documentElement.lang=lang;
   syncAnimationMenu();
   localizeDownloadMenu();
+  localizePreviewControls();
   document.querySelectorAll("[data-i18n]").forEach(el=>{const value=t(el.dataset.i18n);if(el.dataset.i18n==="kitNote")el.innerHTML=value;else el.textContent=value;});
   document.querySelectorAll("[data-title]").forEach(el=>{el.title=t(el.dataset.title);el.setAttribute("aria-label",t(el.dataset.title));});
   document.querySelectorAll("[data-language]").forEach(button=>{const active=button.dataset.language===lang;button.classList.toggle("active",active);button.setAttribute("aria-pressed",String(active));});$("#artboard").setAttribute("aria-label",t("canvasLabel"));
@@ -816,6 +817,26 @@ function localizeDownloadMenu(){
   for(const [id,key] of Object.entries({"download-menu-label":"main","download-png-label":"png","download-mp4-label":"mp4","download-gif-label":"gif","download-png-hint":"pngHint","download-mp4-hint":"mp4Hint","download-gif-hint":"gifHint"})){
     const el=document.getElementById(id);if(el)el.textContent=labels[key];
   }
+}
+function localizePreviewControls(){
+  const en=lang==="en";
+  const gifButton=document.getElementById("download-gif");
+  const gifLabel=document.getElementById("gif-duration-label");
+  const gifQuality=document.getElementById("gif-quality");
+  const gifDuration=document.getElementById("gif-duration");
+  if(gifButton)gifButton.textContent=en?"Download GIF":"Скачать GIF";
+  if(gifLabel)gifLabel.textContent=en?"GIF duration":"Длительность GIF";
+  if(gifQuality){gifQuality.setAttribute("aria-label",en?"GIF quality":"Качество GIF");
+    gifQuality.options[0].textContent="Discord Optimized";
+    gifQuality.options[1].textContent="High Quality";}
+  if(gifDuration)for(const option of gifDuration.options)option.textContent=option.value+(en?" sec":" сек");
+  const previewCanvas=document.getElementById("preview-canvas");
+  if(previewCanvas)previewCanvas.setAttribute("aria-label",en?"Animated preview of your composition":"Анимированный предпросмотр композиции");
+  if(typeof refreshMP4Controls==="function")refreshMP4Controls();
+  const gifStatus=document.getElementById("gif-export-status");
+  if(gifStatus && gifStatus.dataset.state==="finished")gifStatus.textContent=(en?"GIF saved: ":"GIF готов: ")+gifStatus.dataset.size+(en?" MB":" МБ");
+  else if(gifStatus && gifStatus.dataset.state==="encoding")gifStatus.textContent=en?"Encoding GIF…":"Кодирование GIF…";
+  else if(gifStatus && gifStatus.dataset.state==="error")gifStatus.textContent=(en?"GIF error: ":"Ошибка GIF: ")+(gifStatus.dataset.error||"");
 }
 function closeDownloadMenu(){const menu=document.getElementById("download-menu"),button=document.getElementById("download-menu-toggle");menu.hidden=true;button.setAttribute("aria-expanded","false");}
 $("#download-menu-toggle").addEventListener("click",()=>{const menu=$("#download-menu");menu.hidden=!menu.hidden;$("#download-menu-toggle").setAttribute("aria-expanded",String(!menu.hidden));});
@@ -1056,9 +1077,9 @@ if(high&&offline){
 const f=FORMATS[snapshot.format],s=Math.min(1,maxEdge/Math.max(f.w,f.h)),w=Math.round(f.w*s),h=Math.round(f.h*s);
 const c=document.createElement('canvas');c.width=w;c.height=h;
 const ctx=c.getContext('2d',{willReadFrequently:true}),scratch=document.createElement('canvas'),frames=[];const start=performance.now();
-for(let i=0;i<seconds*fps;i++){const wait=start+i*(1000/fps)-performance.now();if(wait>0)await new Promise(r=>setTimeout(r,wait));render(scratch,snapshot,{assets:gifAssets,images:gifImages,selection:false,animate:true});ctx.clearRect(0,0,w,h);ctx.drawImage(scratch,0,0,w,h);frames.push(ctx.getImageData(0,0,w,h));if(i%6===0)msg.textContent=`GIF: ${i+1}/${seconds*fps}`;await new Promise(r=>setTimeout(r,0))}
-msg.textContent='Encoding GIF…';await new Promise(r=>setTimeout(r,0));const palette=paletteFor(frames),cache=new Map(),indexedFrames=frames.map(frame=>high?indexedDither(frame,palette,w,h):indexed(frame,palette,cache));frames.length=0;const blob=encode(indexedFrames,w,h,palette,fps),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`keeper-animation-${high?"high-quality":"discord"}-${seconds}s.gif`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);msg.textContent=`GIF готов: ${(blob.size/1048576).toFixed(1)} МБ`;
-}catch(e){console.error('GIF export failed:',e);msg.textContent='Ошибка GIF: '+(e?.message||String(e))}finally{busy=false;btn.disabled=false}});
+for(let i=0;i<seconds*fps;i++){const wait=start+i*(1000/fps)-performance.now();if(wait>0)await new Promise(r=>setTimeout(r,wait));render(scratch,snapshot,{assets:gifAssets,images:gifImages,selection:false,animate:true});ctx.clearRect(0,0,w,h);ctx.drawImage(scratch,0,0,w,h);frames.push(ctx.getImageData(0,0,w,h));if(i%6===0){msg.dataset.state="progress";msg.textContent=`GIF: ${i+1}/${seconds*fps}`;}await new Promise(r=>setTimeout(r,0))}
+msg.dataset.state="encoding";msg.textContent=lang==="en"?"Encoding GIF…":"Кодирование GIF…";await new Promise(r=>setTimeout(r,0));const palette=paletteFor(frames),cache=new Map(),indexedFrames=frames.map(frame=>high?indexedDither(frame,palette,w,h):indexed(frame,palette,cache));frames.length=0;const blob=encode(indexedFrames,w,h,palette,fps),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`keeper-animation-${high?"high-quality":"discord"}-${seconds}s.gif`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);msg.dataset.state="finished";msg.dataset.size=(blob.size/1048576).toFixed(1);msg.textContent=(lang==="en"?"GIF saved: ":"GIF готов: ")+msg.dataset.size+(lang==="en"?" MB":" МБ");
+}catch(e){console.error('GIF export failed:',e);msg.dataset.state='error';msg.dataset.error=e?.message||String(e);msg.textContent=(lang==='en'?'GIF error: ':'Ошибка GIF: ')+msg.dataset.error}finally{busy=false;btn.disabled=false}});
 })();
 
 return {};
