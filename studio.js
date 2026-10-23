@@ -177,15 +177,15 @@ function drawBackground(ctx,state,W,H,images){
     for(let i=0;i<28;i++){const x=((i*317+139)%997)/997*W;const y=((i*271+91)%991)/991*H;const size=(i%4===0?2:1)*W/1080;ctx.fillStyle=i%3===0?"#f0c68d66":"#eac7a42b";ctx.beginPath();ctx.arc(x,y,size,0,Math.PI*2);ctx.fill();}
   }
 }
-function render(canvas,state,{assets,images,selected=null,scale=1,selection=true}={}){
+function render(canvas,state,{assets,images,selected=null,scale=1,selection=true,animate=selection,time=null}={}){
   const {w:W,h:H}=FORMATS[state.format];canvas.width=Math.round(W*scale);canvas.height=Math.round(H*scale);
   const ctx=canvas.getContext("2d");ctx.scale(scale,scale);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
   drawBackground(ctx,state,W,H,images);
   for(const obj of state.objects){
     const b=geometry(ctx,obj,W,H,assets);ctx.save();ctx.translate(b.x,b.y);ctx.rotate(b.angle);
-    if(selection && obj.animation){
+    if(animate && obj.animation){
       const speed = {slow:.55,normal:1,fast:1.65}[obj.animationSpeed] || 1;
-      const t = (performance.now()/1000)*2*Math.PI*speed;
+      const t = ((time===null?performance.now():time)/1000)*2*Math.PI*speed;
       switch(obj.animation){
         case "float": ctx.translate(0,Math.sin(t*.55)*H*.012); break;
         case "bounce": ctx.translate(0,-Math.abs(Math.sin(t*.7))*H*.025); break;
@@ -820,10 +820,69 @@ function updateShareLink(){const publicUrl=location.hostname.endsWith(".github.i
 $("#share").addEventListener("click",()=>{renderShareOptions();if(!$("#share-text").value)$("#share-text").value=SHARE_TEMPLATES[$("#share-template").value];updateShareLink();$("#share-dialog").showModal();});
 $("#share-template").addEventListener("change",()=>{$("#share-text").value=SHARE_TEMPLATES[$("#share-template").value];updateShareLink();});
 $("#share-text").addEventListener("input",updateShareLink);$("#share-download").addEventListener("click",()=>downloadImage($("#share-download")));
+// Isolated animation preview. The editor canvas and existing PNG export are unchanged.
+let previewFrame=0, previewStart=0;
+function stopLivePreview(){if(previewFrame){cancelAnimationFrame(previewFrame);previewFrame=0;}}
 $("#preview").addEventListener("click",async()=>{
-  try{const output=await exportCanvas();const blob=await new Promise(resolve=>output.toBlob(resolve,"image/png"));if(previewURL)URL.revokeObjectURL(previewURL);previewURL=URL.createObjectURL(blob);$("#preview-image").src=previewURL;$("#preview-dialog").showModal();}catch{toast(t("exportError"));}
+  try{
+    await ensureImages(state);
+    const dialog=$("#preview-dialog"),view=$("#preview-canvas");
+    previewStart=performance.now();dialog.showModal();
+    function frame(now){
+      if(!dialog.open){previewFrame=0;return;}
+      render(view,state,{assets,images,selection:false,animate:true,time:now-previewStart,scale:.6});
+      previewFrame=requestAnimationFrame(frame);
+    }
+    previewFrame=requestAnimationFrame(frame);
+  }catch(error){console.error("Preview:",error);toast(t("exportError"));}
 });
-$("#preview-dialog").addEventListener("close",()=>{if(previewURL){URL.revokeObjectURL(previewURL);previewURL=null;$("#preview-image").removeAttribute("src");}});
+$("#preview-dialog").addEventListener("close",stopLivePreview);
+
+// MP4 is only enabled if this browser can actually encode MP4 using MediaRecorder.
+const mp4Types=["video/mp4;codecs=avc1.42E01E","video/mp4;codecs=avc1","video/mp4"];
+function mp4Mime(){return typeof MediaRecorder!=="undefined"?mp4Types.find(type=>MediaRecorder.isTypeSupported(type)):null;}
+let recording=false;
+$("#export-mp4").addEventListener("click",async()=>{
+  if(recording)return;
+  const mime=mp4Mime();
+  if(!mime){toast(lang==="ru"?"Этот браузер не поддерживает запись MP4. Попробуйте другой браузер.":"This browser cannot record MP4. Try another browser.");return;}
+  const button=$("#export-mp4"),original=button.textContent;
+  recording=true;button.disabled=true;
+  let stream,recorder,frameId;
+  try{
+    await ensureImages(state);
+    const duration=Number($("#video-duration").value)*1000;
+    const {w,h}=FORMATS[state.format],factor=Math.min(1,1080/Math.max(w,h));
+    const video=document.createElement("canvas");video.width=Math.round(w*factor);video.height=Math.round(h*factor);
+    if(!video.captureStream)throw Error("Canvas capture is unavailable");
+    stream=video.captureStream(30);
+    const chunks=[];
+    recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:3500000});
+    const complete=new Promise((resolve,reject)=>{recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};recorder.onerror=e=>reject(e.error||Error("Recording error"));recorder.onstop=()=>resolve();});
+    const start=performance.now();
+    const tick=now=>{
+      render(video,state,{assets,images,selection:false,animate:true,time:now-start,scale:factor});
+      if(now-start<duration&&recorder.state==="recording")frameId=requestAnimationFrame(tick);
+    };
+    render(video,state,{assets,images,selection:false,animate:true,time:0,scale:factor});
+    recorder.start(200);frameId=requestAnimationFrame(tick);
+    const end=performance.now()+duration;
+    while(performance.now()<end&&recorder.state==="recording"){
+      button.textContent=(lang==="ru"?"Запись ":"Recording ")+Math.max(0,Math.ceil((end-performance.now())/1000))+"s";
+      await new Promise(resolve=>setTimeout(resolve,200));
+    }
+    cancelAnimationFrame(frameId);
+    if(recorder.state==="recording")recorder.stop();
+    await complete;
+    if(!chunks.length)throw Error("Empty recording");
+    const blob=new Blob(chunks,{type:"video/mp4"});
+    const url=URL.createObjectURL(blob),a=document.createElement("a");
+    a.href=url;a.download=($("#file-name").value.replace(/[<>:"/\\|?*\u0000-\u001f]/g,"").trim()||"keeper-story")+".mp4";
+    document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
+    toast(lang==="ru"?"MP4 готов — проверьте загрузки":"MP4 ready — check your downloads");
+  }catch(error){console.error("MP4 export:",error);toast(lang==="ru"?"Не удалось записать MP4 в этом браузере":"MP4 recording failed in this browser");}
+  finally{if(frameId)cancelAnimationFrame(frameId);if(recorder?.state==="recording")recorder.stop();stream?.getTracks().forEach(track=>track.stop());recording=false;button.disabled=false;button.textContent=original;}
+});
 document.querySelectorAll("dialog").forEach(dialog=>dialog.addEventListener("click",event=>{if(event.target===dialog&&!dialog.hasAttribute("data-no-backdrop-dismiss")){const r=dialog.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)dialog.close();}}));
 window.addEventListener("resize",fitCanvas);new ResizeObserver(fitCanvas).observe($("#canvas-area"));
 document.querySelectorAll("[data-icon]").forEach(el=>el.innerHTML=icon(el.dataset.icon));
