@@ -184,13 +184,24 @@ function render(canvas,state,{assets,images,selected=null,scale=1,selection=true
   for(const obj of state.objects){
     const b=geometry(ctx,obj,W,H,assets);ctx.save();ctx.translate(b.x,b.y);ctx.rotate(b.angle);
     if(selection && obj.animation){
-      const t=(performance.now()/1000)*2*Math.PI;
+      const speed = {slow:.55,normal:1,fast:1.65}[obj.animationSpeed] || 1;
+      const t = (performance.now()/1000)*2*Math.PI*speed;
       switch(obj.animation){
-        case "float":ctx.translate(0,Math.sin(t*.55)*H*.012);break;
-        case "bounce":ctx.translate(0,-Math.abs(Math.sin(t*.7))*H*.025);break;
-        case "pulse":{const s=1+.055*Math.sin(t*.65);ctx.scale(s,s);break;}
-        case "sway":ctx.rotate(Math.sin(t*.55)*.095);break;
-        case "fade":ctx.globalAlpha=.58+.42*(.5+.5*Math.sin(t*.5));break;
+        case "float": ctx.translate(0,Math.sin(t*.55)*H*.012); break;
+        case "bounce": ctx.translate(0,-Math.abs(Math.sin(t*.7))*H*.025); break;
+        case "pulse": {const s=1+.055*Math.sin(t*.65);ctx.scale(s,s);break;}
+        case "sway": ctx.rotate(Math.sin(t*.55)*.095); break;
+        case "fade": ctx.globalAlpha=.35+.65*(.5+.5*Math.sin(t*.5)); break;
+        case "breathe": {const s=1+.027*Math.sin(t*.42);ctx.scale(s,s);break;}
+        case "rotate": ctx.rotate(t*.32); break;
+        case "shake": ctx.translate(Math.sin(t*5)*W*.003,Math.cos(t*4.4)*H*.003); break;
+        case "swing": ctx.rotate(Math.sin(t*.8)*.18); break;
+        case "wiggle": ctx.rotate(Math.sin(t*2.4)*.055);ctx.translate(Math.sin(t*2)*W*.003,0);break;
+        case "hop": ctx.translate(Math.sin(t*.6)*W*.009,-Math.pow(Math.max(0,Math.sin(t*.6)),2)*H*.018);break;
+        case "slide": ctx.translate(Math.sin(t*.48)*W*.025,0);break;
+        case "zoom": {const s=1+.11*(.5+.5*Math.sin(t*.48));ctx.scale(s,s);break;}
+        case "pop": {const s=1+.12*Math.pow(Math.max(0,Math.sin(t*.65)),5);ctx.scale(s,s);break;}
+        case "drift": ctx.translate(Math.sin(t*.34)*W*.016,Math.cos(t*.34)*H*.014);break;
       }
     }
     if(obj.type==="image"){
@@ -508,7 +519,23 @@ function persist(){
   },300);
 }
 function paint(){render(canvas,state,{assets,images,selected});}
-const animationEffects=[["float","↟","Парение","Float"],["bounce","↥","Прыжок","Bounce"],["pulse","◉","Пульс","Pulse"],["sway","↶","Покачивание","Sway"],["fade","◐","Появление","Fade"]];
+const animationEffects=[
+  ["float","↟","Парение","Float","smooth"],
+  ["sway","↶","Покачивание","Sway","smooth"],
+  ["pulse","◉","Пульс","Pulse","smooth"],
+  ["breathe","♡","Дыхание","Breathe","smooth"],
+  ["rotate","⟳","Вращение","Rotate","smooth"],
+  ["bounce","↥","Прыжок","Bounce","dynamic"],
+  ["shake","≋","Дрожание","Shake","dynamic"],
+  ["swing","↔","Маятник","Swing","dynamic"],
+  ["wiggle","〰","Виляние","Wiggle","dynamic"],
+  ["hop","⌃","Подскок","Hop","dynamic"],
+  ["fade","◐","Появление","Fade","movement"],
+  ["slide","→","Сдвиг","Slide","movement"],
+  ["zoom","⊕","Увеличение","Zoom","movement"],
+  ["pop","✦","Вспышка","Pop","movement"],
+  ["drift","↗","Дрейф","Drift","movement"]
+];
 let animationOpen=false;
 function syncAnimationMenu(){
   const o=selectedObject(),ru=document.documentElement.lang!=="en";
@@ -518,14 +545,28 @@ function syncAnimationMenu(){
   $("#animation-toggle").disabled=!o;
   $("#animation-toggle").setAttribute("aria-expanded",String(animationOpen&&!!o));
   $("#animation-menu").hidden=!animationOpen||!o;
-  $("#animation-grid").innerHTML=animationEffects.map(([id,symbol,name,en])=>`<button type="button" class="animation-effect ${o?.animation===id?"active":""}" data-animation="${id}" aria-pressed="${o?.animation===id}"><span>${symbol}</span>${ru?name:en}${o?.animation===id?" ✓":""}</button>`).join("");
+  const groupNames={smooth:ru?"Плавные":"Smooth",dynamic:ru?"Динамичные":"Dynamic",movement:ru?"Появление и движение":"Appear & move"};
+  $("#animation-grid").innerHTML=Object.entries(groupNames).map(([group,title])=>`<div class="animation-group"><div class="animation-group-title">${title}</div><div class="animation-group-items">${animationEffects.filter(effect=>effect[4]===group).map(([id,symbol,name,en])=>`<button type="button" class="animation-effect ${o?.animation===id?"active":""}" data-animation="${id}" aria-pressed="${o?.animation===id}"><span>${symbol}</span>${ru?name:en}${o?.animation===id?" ✓":""}</button>`).join("")}</div></div>`).join("");
+  $("#animation-speed-label").textContent=ru?"Скорость анимации":"Animation speed";
+  for(const btn of document.querySelectorAll("[data-animation-speed]")){
+    const value=btn.dataset.animationSpeed;
+    btn.textContent=ru?({slow:"Медленно",normal:"Обычно",fast:"Быстро"}[value]):({slow:"Slow",normal:"Normal",fast:"Fast"}[value]);
+    btn.classList.toggle("active",!!o?.animation&&(o.animationSpeed||"normal")===value);
+    btn.disabled=!o?.animation;
+    btn.setAttribute("aria-pressed",String(!!o?.animation&&(o.animationSpeed||"normal")===value));
+  }
   $("#animation-clear").textContent=ru?"✕ Убрать анимацию":"✕ Remove animation";
   $("#animation-clear").disabled=!o?.animation;
 }
 $("#animation-toggle").addEventListener("click",()=>{animationOpen=!animationOpen;syncAnimationMenu();});
 $("#animation-close").addEventListener("click",()=>{animationOpen=false;syncAnimationMenu();});
-$("#animation-grid").addEventListener("click",e=>{const btn=e.target.closest("[data-animation]");const o=selectedObject();if(!btn||!o)return;o.animation=btn.dataset.animation;commit();syncAnimationMenu();});
-$("#animation-clear").addEventListener("click",()=>{const o=selectedObject();if(!o)return;delete o.animation;commit();syncAnimationMenu();});
+$("#animation-grid").addEventListener("click",e=>{const btn=e.target.closest("[data-animation]");const o=selectedObject();if(!btn||!o)return;o.animation=btn.dataset.animation;o.animationSpeed ||= "normal";commit();syncAnimationMenu();});
+$("#animation-speed").addEventListener("click",e=>{
+  const btn=e.target.closest("[data-animation-speed]"),o=selectedObject();
+  if(!btn||!o?.animation)return;
+  o.animationSpeed=btn.dataset.animationSpeed;commit();syncAnimationMenu();
+});
+$("#animation-clear").addEventListener("click",()=>{const o=selectedObject();if(!o)return;delete o.animation;delete o.animationSpeed;commit();syncAnimationMenu();});
 (function animateFrame(){if(state.objects.some(o=>o.animation)&&!document.hidden)paint();requestAnimationFrame(animateFrame);})();
 function fitCanvas(){
   const area=$("#canvas-area"),{w,h}=FORMATS[state.format];
