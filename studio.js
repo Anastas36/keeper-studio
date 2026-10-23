@@ -199,6 +199,13 @@ function render(canvas,state,{assets,images,selected=null,scale=1,selection=true
       const accent=state.background==="white"&&!state.transparent?"#79556e":"#f8d09b";
       ctx.save();ctx.translate(b.x,b.y);ctx.rotate(b.angle);ctx.lineWidth=unit;ctx.strokeStyle=accent;ctx.setLineDash([5*unit,4*unit]);ctx.strokeRect(-b.w/2,-b.h/2,b.w,b.h);ctx.setLineDash([]);
       for(const [x,y]of [[-1,-1],[1,-1],[-1,1],[1,1]]){ctx.fillStyle=accent;ctx.fillRect(x*b.w/2-4.5*unit,y*b.h/2-4.5*unit,9*unit,9*unit);ctx.strokeRect(x*b.w/2-4.5*unit,y*b.h/2-4.5*unit,9*unit,9*unit);}
+      // Rotation handle: placed above the selected object, independent of resize corners.
+      const handleY=-b.h/2-26*unit;
+      ctx.beginPath();ctx.moveTo(0,-b.h/2);ctx.lineTo(0,handleY+9*unit);ctx.stroke();
+      ctx.fillStyle="#302333";ctx.beginPath();ctx.arc(0,handleY,12*unit,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle=accent;ctx.lineWidth=1.7*unit;ctx.beginPath();ctx.arc(0,handleY,11*unit,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.arc(0,handleY,5.2*unit,-Math.PI*.78,Math.PI*.64);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(5.2*unit,handleY+3.5*unit);ctx.lineTo(6.8*unit,handleY-1*unit);ctx.lineTo(2.5*unit,handleY+.4*unit);ctx.stroke();
       ctx.restore();
     }
   }
@@ -219,6 +226,10 @@ function cornerAt(point,b,tolerance){
   const p=rotate(point.x-b.x,point.y-b.y,-b.angle);
   return CORNERS.find(c=>Math.abs(p.x-c.sx*b.w/2)<=tolerance&&Math.abs(p.y-c.sy*b.h/2)<=tolerance)||null;
 }
+function rotationHandleAt(point,b,tolerance,unit){
+  const p=rotate(point.x-b.x,point.y-b.y,-b.angle);
+  return Math.hypot(p.x,p.y+b.h/2+26*unit)<=Math.max(tolerance,13*unit);
+}
 function resizeFromCorner(original,b,corner,point,W,H){
   const diagonal=rotate(corner.sx*b.w,corner.sy*b.h,b.angle);
   const anchor={x:b.x-diagonal.x/2,y:b.y-diagonal.y/2};
@@ -231,7 +242,7 @@ function resizeFromCorner(original,b,corner,point,W,H){
   return result;
 }
 
-return {CORNERS,cornerAt,resizeFromCorner};
+return {CORNERS,cornerAt,rotationHandleAt,resizeFromCorner};
 })();
 
 // Source: music.mjs
@@ -375,7 +386,7 @@ return {EXTRA_COPY,ABOUT_COPY,STICKER_RU,EGG_RU,SHARE_TEMPLATES,SHARE_ATTRIBUTIO
 const __module7=(()=>{
 const {FORMATS,TEMPLATE_IDS,TEMPLATE_CATEGORIES,makeTemplate,textObject,imageObject,clone,clamp,uid,sanitizeState,History,reorder,moveLayerTo,changeFormat}=__module0;
 const {render,geometry,hitTest}=__module1;
-const {cornerAt,resizeFromCorner}=__module2;
+const {cornerAt,rotationHandleAt,resizeFromCorner}=__module2;
 const {initMusic}=__module3;
 const {initOpening}=__module4;
 const {initCounter}=__module5;
@@ -600,17 +611,25 @@ function stepHistory(direction){state=direction==="undo"?history.undo():history.
 function canvasPoint(event){const r=canvas.getBoundingClientRect(),f=FORMATS[state.format];return {x:(event.clientX-r.left)/r.width*f.w,y:(event.clientY-r.top)/r.height*f.h};}
 canvas.addEventListener("pointerdown",event=>{
   if(event.button!==0)return;event.preventDefault();canvas.focus({preventScroll:true});
-  const p=canvasPoint(event),f=FORMATS[state.format],o=selectedObject();let corner=null;
-  if(o){const b=geometry(canvas.getContext("2d"),o,f.w,f.h,assets);corner=cornerAt(p,b,14*f.w/canvas.clientWidth);}
-  const hit=corner?o:hitTest(p,state,canvas.getContext("2d"),assets);
+  const p=canvasPoint(event),f=FORMATS[state.format],o=selectedObject();let corner=null,rotating=false;
+  if(o){const b=geometry(canvas.getContext("2d"),o,f.w,f.h,assets),unit=f.w/canvas.clientWidth;rotating=rotationHandleAt(p,b,13*unit,unit);if(!rotating)corner=cornerAt(p,b,14*unit);}
+  const hit=(corner||rotating)?o:hitTest(p,state,canvas.getContext("2d"),assets);
   selectObject(hit?.id||null);if(!hit)return;
   const b=geometry(canvas.getContext("2d"),hit,f.w,f.h,assets);
-  drag={id:hit.id,start:p,original:clone(hit),corner,b};canvas.setPointerCapture(event.pointerId);canvas.style.cursor=corner?(corner.sx===corner.sy?"nwse-resize":"nesw-resize"):"grabbing";
+  drag={id:hit.id,start:p,original:clone(hit),corner,rotating,b,initialPointerAngle:Math.atan2(p.y-b.y,p.x-b.x)};canvas.setPointerCapture(event.pointerId);canvas.style.cursor=rotating?"crosshair":corner?(corner.sx===corner.sy?"nwse-resize":"nesw-resize"):"grabbing";
 });
 canvas.addEventListener("pointermove",event=>{
-  if(!drag){const p=canvasPoint(event),o=selectedObject(),f=FORMATS[state.format];const c=o?cornerAt(p,geometry(canvas.getContext("2d"),o,f.w,f.h,assets),14*f.w/canvas.clientWidth):null;const hit=hitTest(p,state,canvas.getContext("2d"),assets);canvas.style.cursor=c?(c.sx===c.sy?"nwse-resize":"nesw-resize"):hit?"grab":"default";return;}
+  if(!drag){const p=canvasPoint(event),o=selectedObject(),f=FORMATS[state.format],unit=f.w/canvas.clientWidth,b=o?geometry(canvas.getContext("2d"),o,f.w,f.h,assets):null;const rotating=b&&rotationHandleAt(p,b,13*unit,unit);const c=b&&!rotating?cornerAt(p,b,14*unit):null;const hit=hitTest(p,state,canvas.getContext("2d"),assets);canvas.style.cursor=rotating?"crosshair":c?(c.sx===c.sy?"nwse-resize":"nesw-resize"):hit?"grab":"default";return;}
   const o=state.objects.find(v=>v.id===drag.id);if(!o)return;const p=canvasPoint(event),f=FORMATS[state.format];
-  if(drag.corner)Object.assign(o,resizeFromCorner(drag.original,drag.b,drag.corner,p,f.w,f.h));
+  if(drag.rotating){
+    const pointerAngle=Math.atan2(p.y-drag.b.y,p.x-drag.b.x);
+    let delta=(pointerAngle-drag.initialPointerAngle)*180/Math.PI;
+    // Shift snaps to 15-degree increments for precise layouts.
+    let angle=(drag.original.rotation||0)+delta;
+    if(event.shiftKey)angle=Math.round(angle/15)*15;
+    o.rotation=((angle+180)%360+360)%360-180;
+  }
+  else if(drag.corner)Object.assign(o,resizeFromCorner(drag.original,drag.b,drag.corner,p,f.w,f.h));
   else{o.x=clamp(drag.original.x+(p.x-drag.start.x)/f.w,-.5,1.5);o.y=clamp(drag.original.y+(p.y-drag.start.y)/f.h,-.5,1.5);}
   paint();
 });
