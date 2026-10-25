@@ -314,11 +314,16 @@ return {initMusic};
 // Source: opening.mjs
 const __module4=(()=>{
 
+function loadGifAssetsAfterOpening(){
+ // Keep large GIF export assets off the critical opening-video loading path.
+ const run=()=>{for(const file of ["gif-full-1.js","gif-full-2.js","gif-full-3.js"]){const script=document.createElement("script");script.src=file;script.async=false;document.body.appendChild(script);}};
+ if("requestIdleCallback" in window)window.requestIdleCallback(run,{timeout:4000});else setTimeout(run,300);
+}
 function initOpening({music,t,icon}){
  const root=document.querySelector("#opening"),video=document.querySelector("#opening-video"),sound=document.querySelector("#opening-sound"),skip=document.querySelector("#opening-skip"),retry=document.querySelector("#opening-retry");
  let complete=false,resolve;const finished=new Promise(r=>resolve=r);
  function localize(){root.setAttribute("aria-label",t("openingLabel"));sound.innerHTML=icon(music.audible?"volume":"muted")+"<span>"+t(music.audible?"muteMusic":"musicBlocked")+"</span>";sound.setAttribute("aria-pressed",String(music.audible));}
- function finish(){if(complete)return;complete=true;clearTimeout(safety);video.pause();root.classList.add("finished");document.querySelector("header").inert=false;document.querySelector("main").inert=false;resolve();setTimeout(()=>root.hidden=true,330);document.removeEventListener("keeper-music-change",localize);}
+ function finish(){if(complete)return;complete=true;clearTimeout(safety);video.pause();root.classList.add("finished");document.querySelector("header").inert=false;document.querySelector("main").inert=false;resolve();setTimeout(()=>root.hidden=true,330);loadGifAssetsAfterOpening();document.removeEventListener("keeper-music-change",localize);}
  async function play(){retry.hidden=true;try{await video.play();}catch{if(!complete)retry.hidden=false;}}
  sound.addEventListener("click",()=>{if(music.audible)music.toggleMute();else music.start({explicit:true,unmute:true});});skip.addEventListener("click",finish);retry.addEventListener("click",play);
  video.addEventListener("playing",()=>{retry.hidden=true;music.start();});video.addEventListener("loadeddata",()=>music.start());video.addEventListener("ended",finish,{once:true});video.addEventListener("error",finish,{once:true});
